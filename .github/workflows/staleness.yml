@@ -1,13 +1,13 @@
 # Dead-man's switch for the published valuation dashboard.
 # Deployed to the PUBLIC pages repo (.github/workflows/staleness.yml) by scripts/publish_pages.sh.
-# The nightly snapshot job (com.valuation.daily) republishes this repo every day; if it stops (Mac off,
+# The morning/evening snapshot jobs republish this repo twice daily; if they stop (Mac off,
 # launchd unloaded, login-session issue) the dashboard silently goes stale. This scheduled Action checks
 # how long since the last publish and opens an issue (-> GitHub emails the owner) when it exceeds the
 # threshold. Kept version-controlled in the main repo so it isn't hand-edited on the public side.
 name: dashboard-staleness-alert
 on:
   schedule:
-    - cron: "0 3 * * *"        # daily 03:00 UTC (~10:00 Asia/Bangkok) — after the nightly publish window
+    - cron: "30 1,13 * * *"   # 08:30 and 20:30 Asia/Bangkok — after both publish windows
   workflow_dispatch: {}
 permissions:
   contents: read
@@ -19,7 +19,7 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const MAX_AGE_HOURS = 48;                       // ~2 missed nightly runs
+            const MAX_AGE_HOURS = 14.5;                     // one missed twice-daily run, plus buffer
             const { data: commits } = await github.rest.repos.listCommits({
               owner: context.repo.owner, repo: context.repo.repo, per_page: 1,
             });
@@ -37,8 +37,8 @@ jobs:
                 owner: context.repo.owner, repo: context.repo.repo,
                 title: `⚠️ Dashboard stale — no publish in ${ageH.toFixed(0)}h`,
                 body: `The valuation dashboard has not been republished since **${last.toISOString()}** `
-                    + `(${ageH.toFixed(1)}h ago). The nightly snapshot job \`com.valuation.daily\` may have `
-                    + `stopped — check the Mac is on, the launchd agent is loaded, and prices/data are current.`,
+                    + `(${ageH.toFixed(1)}h ago). The twice-daily snapshot jobs may have stopped — check `
+                    + `the Mac is on, both launchd agents are loaded, and prices/data are current.`,
               });
             }
             core.setFailed(`dashboard stale for ${ageH.toFixed(1)}h`);   // second alert channel (workflow-failure email)
