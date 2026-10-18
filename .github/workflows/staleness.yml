@@ -2,8 +2,10 @@
 # Deployed to the PUBLIC pages repo (.github/workflows/staleness.yml) by scripts/publish_pages.sh.
 # The morning/evening snapshot jobs republish this repo twice daily; if they stop (Mac off,
 # launchd unloaded, login-session issue) the dashboard silently goes stale. This scheduled Action checks
-# how long since the last publish and opens an issue (-> GitHub emails the owner) when it exceeds the
-# threshold. Kept version-controlled in the main repo so it isn't hand-edited on the public side.
+# how long since the last publish on SET sessions and opens an issue (-> GitHub emails the owner) when it
+# exceeds the threshold. Weekends and verified SET holidays are expected no-publish days. Keep the holiday
+# set synchronized with config/set_trading_holidays.json (covered by a test). Kept version-controlled here
+# so it isn't hand-edited on the public side.
 name: dashboard-staleness-alert
 on:
   schedule:
@@ -16,10 +18,32 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@v9
         with:
           script: |
             const MAX_AGE_HOURS = 14.5;                     // one missed twice-daily run, plus buffer
+            const SET_HOLIDAYS = new Set([
+              "2026-01-01", "2026-01-02", "2026-03-03", "2026-04-06", "2026-04-13",
+              "2026-04-14", "2026-04-15", "2026-05-01", "2026-05-04", "2026-06-01",
+              "2026-06-03", "2026-07-28", "2026-07-29", "2026-08-12", "2026-10-13",
+              "2026-10-16", "2026-10-23", "2026-12-07", "2026-12-10", "2026-12-31",
+              "2027-01-01", "2027-02-22", "2027-04-06", "2027-04-13", "2027-04-14",
+              "2027-04-15", "2027-05-03", "2027-05-04", "2027-05-20", "2027-06-03",
+              "2027-07-19", "2027-07-28", "2027-08-12", "2027-10-13", "2027-10-25",
+              "2027-12-06", "2027-12-10", "2027-12-31",
+            ]);
+            const dateParts = Object.fromEntries(
+              new Intl.DateTimeFormat("en-US", {
+                timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit",
+                weekday: "short",
+              }).formatToParts(new Date()).map(part => [part.type, part.value]),
+            );
+            const bangkokDay = `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+            const nonSession = ["Sat", "Sun"].includes(dateParts.weekday) || SET_HOLIDAYS.has(bangkokDay);
+            if (nonSession) {
+              core.info(`${bangkokDay} is a SET non-session day; no dashboard publish is expected`);
+              return;
+            }
             const { data: commits } = await github.rest.repos.listCommits({
               owner: context.repo.owner, repo: context.repo.repo, per_page: 1,
             });
