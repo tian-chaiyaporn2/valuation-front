@@ -50,11 +50,24 @@ jobs:
             const last = new Date(commits[0].commit.committer.date);
             const ageH = (Date.now() - last.getTime()) / 3.6e6;
             core.info(`last publish ${last.toISOString()} — ${ageH.toFixed(1)}h ago (threshold ${MAX_AGE_HOURS}h)`);
-            if (ageH <= MAX_AGE_HOURS) return;              // fresh — nothing to do
             const { data: open } = await github.rest.issues.listForRepo({
               owner: context.repo.owner, repo: context.repo.repo, state: "open", per_page: 50,
             });
-            if (open.some(i => i.title.startsWith("⚠️ Dashboard stale"))) {
+            const staleIssues = open.filter(i => i.title.startsWith("⚠️ Dashboard stale"));
+            if (ageH <= MAX_AGE_HOURS) {
+              for (const issue of staleIssues) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner, repo: context.repo.repo, issue_number: issue.number,
+                  body: `Dashboard publishing recovered at **${last.toISOString()}**. Closing this incident automatically.`,
+                });
+                await github.rest.issues.update({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  issue_number: issue.number, state: "closed",
+                });
+              }
+              return;
+            }
+            if (staleIssues.length) {
               core.info("a staleness issue is already open — not duplicating");
             } else {
               await github.rest.issues.create({
