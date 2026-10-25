@@ -44,12 +44,28 @@ jobs:
               core.info(`${bangkokDay} is a SET non-session day; no dashboard publish is expected`);
               return;
             }
-            const { data: commits } = await github.rest.repos.listCommits({
-              owner: context.repo.owner, repo: context.repo.repo, per_page: 1,
-            });
-            const last = new Date(commits[0].commit.committer.date);
+            let last;
+            let freshnessBasis = ".production-published-at";
+            try {
+              const { data: marker } = await github.rest.repos.getContent({
+                owner: context.repo.owner, repo: context.repo.repo,
+                path: ".production-published-at",
+              });
+              if (Array.isArray(marker) || !marker.content) throw new Error("invalid marker");
+              last = new Date(Buffer.from(marker.content, "base64").toString("utf8").trim());
+              if (Number.isNaN(last.getTime())) throw new Error("invalid timestamp");
+            } catch (error) {
+              // Migration fallback only. Once a full publish writes the marker,
+              // World-only commits can no longer mask a stale production book.
+              core.warning(`production marker unavailable (${error.message}); falling back to latest commit`);
+              const { data: commits } = await github.rest.repos.listCommits({
+                owner: context.repo.owner, repo: context.repo.repo, per_page: 1,
+              });
+              last = new Date(commits[0].commit.committer.date);
+              freshnessBasis = "latest commit (migration fallback)";
+            }
             const ageH = (Date.now() - last.getTime()) / 3.6e6;
-            core.info(`last publish ${last.toISOString()} — ${ageH.toFixed(1)}h ago (threshold ${MAX_AGE_HOURS}h)`);
+            core.info(`last production publish ${last.toISOString()} via ${freshnessBasis} — ${ageH.toFixed(1)}h ago (threshold ${MAX_AGE_HOURS}h)`);
             const { data: open } = await github.rest.issues.listForRepo({
               owner: context.repo.owner, repo: context.repo.repo, state: "open", per_page: 50,
             });
