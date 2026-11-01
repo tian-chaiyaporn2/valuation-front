@@ -32,12 +32,15 @@ jobs:
               "2027-07-19", "2027-07-28", "2027-08-12", "2027-10-13", "2027-10-25",
               "2027-12-06", "2027-12-10", "2027-12-31",
             ]);
-            const dateParts = Object.fromEntries(
-              new Intl.DateTimeFormat("en-US", {
-                timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit",
-                weekday: "short",
-              }).formatToParts(new Date()).map(part => [part.type, part.value]),
-            );
+            const bangkokFmt = new Intl.DateTimeFormat("en-US", {
+              timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit",
+              weekday: "short",
+            });
+            const isNonSession = when => {
+              const p = Object.fromEntries(bangkokFmt.formatToParts(when).map(part => [part.type, part.value]));
+              return ["Sat", "Sun"].includes(p.weekday) || SET_HOLIDAYS.has(`${p.year}-${p.month}-${p.day}`);
+            };
+            const dateParts = Object.fromEntries(bangkokFmt.formatToParts(new Date()).map(part => [part.type, part.value]));
             const bangkokDay = `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
             const nonSession = ["Sat", "Sun"].includes(dateParts.weekday) || SET_HOLIDAYS.has(bangkokDay);
             if (nonSession) {
@@ -64,7 +67,12 @@ jobs:
               last = new Date(commits[0].commit.committer.date);
               freshnessBasis = "latest commit (migration fallback)";
             }
-            const ageH = (Date.now() - last.getTime()) / 3.6e6;
+            // Count only hours that fall on SET session days (Bangkok), so a weekend or holiday gap
+            // before the first publish of the next session is not reported as staleness.
+            let ageH = 0;
+            for (let t = last.getTime(); t < Date.now(); t += 9e5) {
+              if (!isNonSession(new Date(t))) ageH += Math.min(9e5, Date.now() - t) / 3.6e6;
+            }
             core.info(`last production publish ${last.toISOString()} via ${freshnessBasis} — ${ageH.toFixed(1)}h ago (threshold ${MAX_AGE_HOURS}h)`);
             const { data: open } = await github.rest.issues.listForRepo({
               owner: context.repo.owner, repo: context.repo.repo, state: "open", per_page: 50,
@@ -88,9 +96,9 @@ jobs:
             } else {
               await github.rest.issues.create({
                 owner: context.repo.owner, repo: context.repo.repo,
-                title: `⚠️ Dashboard stale — no publish in ${ageH.toFixed(0)}h`,
+                title: `⚠️ Dashboard stale — no publish in ${ageH.toFixed(0)} session hours`,
                 body: `The valuation dashboard has not been republished since **${last.toISOString()}** `
-                    + `(${ageH.toFixed(1)}h ago). The twice-daily snapshot jobs may have stopped — check `
+                    + `(${ageH.toFixed(1)} session hours ago). The twice-daily snapshot jobs may have stopped — check `
                     + `the Mac is on, both launchd agents are loaded, and prices/data are current.`,
               });
             }
